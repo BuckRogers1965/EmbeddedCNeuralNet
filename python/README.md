@@ -1,0 +1,1 @@
+# this is the first program I write to do neural network training. I followed a guide to put this together myself, then extended it with another hidden layer.  I was getting 96% accuracy without a CNN. 
