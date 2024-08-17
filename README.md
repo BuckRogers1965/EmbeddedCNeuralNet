@@ -51,12 +51,18 @@ If you have the data in a different place, you have to update mnist.c to load th
 	     ├── t10k-labels-idx1-ubyte
 	     ├── train-images-idx3-ubyte
 	     └── train-labels-idx1-ubyte
+</br> </br>
+On my ubuntu machine I had to install the following library:
 
+</br> </br>
+
+sudo apt-get install libcblas-base-dev </br> </br>
 
  cd EmbeddedCNeuralNet
- gcc library/neural_net.c examples/mnist.c -lm -I. -O6 -lcblas -o embedded_neural_network
+ gcc library/neural_net.c examples/mnist.c -lm -I. -O6 -lcblas -o enet
 
 
+</br> </br>
 </code>
 
 
