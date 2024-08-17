@@ -52,10 +52,12 @@ If you have the data in a different place, you have to update mnist.c to load th
 	     ├── train-images-idx3-ubyte
 	     └── train-labels-idx1-ubyte
 
-</code>
 
  cd EmbeddedCNeuralNet
  gcc library/neural_net.c examples/mnist.c -lm -I. -O6 -lcblas -o embedded_neural_network
+
+
+</code>
 
 
 
