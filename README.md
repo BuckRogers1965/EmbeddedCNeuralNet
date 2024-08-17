@@ -32,6 +32,7 @@ This is how I organize the data and the github project to easily build the proje
 I put the mnist data right next to the githug project and rename the directory to mnist_data.
 If you have the data in a different place, you have to update mnist.c to load the data correctly. 
 
+<code>
 > .
 > ├── EmbeddedCNeuralNet
 > │   ├── a.out
@@ -50,6 +51,7 @@ If you have the data in a different place, you have to update mnist.c to load th
 >     ├── t10k-labels-idx1-ubyte
 >    ├── train-images-idx3-ubyte
 >    └── train-labels-idx1-ubyte
+</code>
 
  cd EmbeddedCNeuralNet
  gcc library/neural_net.c examples/mnist.c -lm -I. -O6 -lcblas -o embedded_neural_network
