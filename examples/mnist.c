@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
-#include "neural_net.h"
+#include "library/neural_net.h"
 
 #define INPUT_SIZE   784
 #define HIDDEN1_SIZE 128
@@ -73,9 +73,9 @@ int main() {
 
     // Load MNIST data into allocated arrays
     printf("Loading MNIST Traning data set. \n");
-    load_mnist_data("../data/train-images-idx3-ubyte", "../data/train-labels-idx1-ubyte", train_images, train_labels, TRAINING_SIZE, INPUT_SIZE, OUTPUT_SIZE);
+    load_mnist_data("../mnist_data/train-images-idx3-ubyte", "../mnist_data/train-labels-idx1-ubyte", train_images, train_labels, TRAINING_SIZE, INPUT_SIZE, OUTPUT_SIZE);
     printf("Loading MNIST Testing data set. \n");
-    load_mnist_data("../data/t10k-images-idx3-ubyte", "../data/t10k-labels-idx1-ubyte", test_images, test_labels, TEST_SIZE, INPUT_SIZE, OUTPUT_SIZE);
+    load_mnist_data("../mnist_data/t10k-images-idx3-ubyte", "../mnist_data/t10k-labels-idx1-ubyte", test_images, test_labels, TEST_SIZE, INPUT_SIZE, OUTPUT_SIZE);
 
     // Create neural network
     printf("Creating neural net and loading layers. \n");

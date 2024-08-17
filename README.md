@@ -22,3 +22,40 @@ This library is also intended to demostrate cutting edge neural network techniqu
 I am just putting the code out there for anyone to use with the MIT licsense. None of this stuff is hard to do.  If you can use this to train a neuralnet on a different training set, please send me the file to put here as an example to others of how to load and train on that data.  Also put in a feature request if you need a different activation fuction, optimizer, loss function, regularizer, or learning rate function you want added.  Please include example code and links to that technique in the request and give me a few weeks to add it.  Thanks!  
 
 And if anyone can help me come up with a loss function I can use to report training process, I would be eternally grateful.  Right now I am just doing a test run of the first 1000 shuffled results at the end of each epoch and reporting that.
+
+
+How to build: 
+
+This is how I organize the data and the github project to easily build the project.
+
+
+I put the mnist data right next to the githug project and rename the directory to mnist_data.
+If you have the data in a different place, you have to update mnist.c to load the data correctly. 
+
+.
+├── EmbeddedCNeuralNet
+│   ├── a.out
+│   ├── examples
+│   │   └── mnist.c
+│   ├── library
+│   │   ├── neural_net.c
+│   │   └── neural_net.h
+│   ├── LICENSE
+│   ├── python
+│   │   ├── README.md
+│   │   └── train.2023-07-19.py
+│   └── README.md
+└── mnist_data
+    ├── t10k-images-idx3-ubyte
+    ├── t10k-labels-idx1-ubyte
+    ├── train-images-idx3-ubyte
+    └── train-labels-idx1-ubyte
+
+ cd EmbeddedCNeuralNet
+ gcc library/neural_net.c examples/mnist.c -lm -I. -O6 -lcblas -o embedded_neural_network
+
+
+
+This will build the program in the root of the project and if you run the program from that location then it will find the data and run properly
+
+
