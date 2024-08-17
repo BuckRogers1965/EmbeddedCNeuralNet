@@ -32,7 +32,7 @@ This is how I organize the data and the github project to easily build the proje
 I put the mnist data right next to the githug project and rename the directory to mnist_data.
 If you have the data in a different place, you have to update mnist.c to load the data correctly. 
 
-'''code
+'''c
 .
 ├── EmbeddedCNeuralNet
 │   ├── a.out
