@@ -5,6 +5,8 @@
 set -e
 
 cd "$(dirname "$0")"
+    echo
+    echo "======================================================================="
 
 for dir in examples/*/; do
     [ -d "${dir}targets/self_test" ] || continue
@@ -15,11 +17,19 @@ for dir in examples/*/; do
         continue
     fi
 
+    echo
     echo ">>> $name: cleaning old build (so training actually re-runs, not a stale cache)"
     make -C "$dir" clean
+    echo
     echo ">>> $name: compiling, training from scratch, exporting, building client, running it"
     make -C "$dir" self_test
     echo ">>> $name: PASS"
+    echo
+    echo
+    echo "======================================================================="
+    echo
 done
+    echo
+    echo "======================================================================="
 
 echo ">>> done"

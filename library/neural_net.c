@@ -41,8 +41,9 @@ struct NeuralNet
     int batchsize;
     double adj_lr_epoch;
     int use_jitter;
-    double jitter_strength;
-    double jitter_decay_rate;
+    double jitter_strength;    // starting jitter amplitude
+    double jitter_decay_rate;  // multiplied into current_jitter each epoch
+    double current_jitter;     // live amplitude; decays across ALL train() calls, never resets
     ErrorFunction calculate_error;
     ErrorFunctionDerivative calculate_error_derivative;
     OptimizationMethod opt_method;
@@ -201,10 +202,25 @@ void softmax(double *input, double *output, int size)
 // -- utility functions --
 double jitter(NeuralNet *net)
 {
-    if (net->use_jitter)
-        return 0.000000001;
-    double base_jitter = ((double)rand() / (double)RAND_MAX) / (net->jitter_strength / 2) - 1.0 / net->jitter_strength;
-    return base_jitter * (1.0 - (double)net->current_epoch / (double)net->epochs);
+    // Floor so jitter is never exactly zero (divide-by-zero guard). The real
+    // jitter is the random, decaying term below -- it runs from the start.
+    const double min_jitter = 1e-11;
+
+    if (!net->use_jitter)
+        return min_jitter;
+
+    // Real jitter: a random kick of the current amplitude. current_jitter starts
+    // at jitter_strength and is decayed once per epoch by train() -- persistently,
+    // across every train() call -- down to the floor. So the kick is big early
+    // (bouncing weights out of shallow local minima) and shrinks monotonically to
+    // the minimum over the whole training, never restarting on the next train().
+    double amplitude = net->current_jitter;
+    if (amplitude < min_jitter)
+        amplitude = min_jitter;
+    double kick = amplitude * (2.0 * ((double)rand() / (double)RAND_MAX) - 1.0); // uniform(-amp, +amp)
+    if (kick >= 0.0 && kick <  min_jitter) return  min_jitter;
+    if (kick <  0.0 && kick > -min_jitter) return -min_jitter;
+    return kick;
 }
 void shuffle_data(double **images, double **labels, int size)
 {
@@ -823,6 +839,7 @@ double get_jitter_strength(NeuralNet *net)
 void set_jitter_strength(NeuralNet *net, double jitter_strength)
 {
     net->jitter_strength = jitter_strength;
+    net->current_jitter = jitter_strength; // reset the live amplitude so it takes effect now
 }
 
 double get_jitter_decay_rate(NeuralNet *net)
@@ -870,8 +887,9 @@ NeuralNet *create_neural_net(int input_size, int epochs, int batchsize, double l
     net->opt_params = NULL;
 
     net->use_jitter = 1;
-    net->jitter_strength = 800;
-    net->jitter_decay_rate = .95;
+    net->jitter_strength = 0.05;   // starting jitter amplitude (decays to the floor over training)
+    net->jitter_decay_rate = .95; // amplitude *= this each epoch (persists across train() calls)
+    net->current_jitter = net->jitter_strength;
 
     net->calculate_error_derivative = cross_entropy_error;
 
@@ -1011,6 +1029,14 @@ void train(NeuralNet *net, double **images, double **labels, int trainsize)
         // than the set actually holds -- small datasets would read past the end).
         printf("Epoch: %d completed, ", net->current_epoch);
         test(net, images, labels, trainsize < 1000 ? trainsize : 1000);
+
+        // Decay the jitter amplitude once per epoch. current_jitter lives on the
+        // net and is NOT reset by train(), so it keeps shrinking across every
+        // train() call until it reaches the floor -- one continuous decay over
+        // the whole training, never restarting on the next call.
+        net->current_jitter *= net->jitter_decay_rate;
+        if (net->current_jitter < 1e-11)
+            net->current_jitter = 1e-11;
 
         // Adjust learning rate or other parameters if needed
         if (net->adj_lr_epoch > 0 && (net->current_epoch) % (int)net->adj_lr_epoch == 0)
