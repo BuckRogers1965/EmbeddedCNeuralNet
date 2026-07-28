@@ -45,6 +45,10 @@ void test(NeuralNet *net, double **images, double **labels, int testsize);
 void save_neural_net(NeuralNet *net, const char *filename);
 NeuralNet *load_neural_net(const char *filename);
 
+// Edge deployment: emit a self-contained C header (float weights, no training
+// metadata) that the standalone inference client in client/ compiles against.
+void export_inference_header(NeuralNet *net, const char *filename);
+
 // Classification
 int classify(NeuralNet *net, double *input);
 

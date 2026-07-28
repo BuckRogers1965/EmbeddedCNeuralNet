@@ -1,1 +1,28 @@
 a.out
+
+# Build outputs
+enet
+gen_reference
+client_test
+examples/mnist/mnist
+examples/fashion-mnist/fashion_mnist
+examples/iris/iris
+examples/*/targets/self_test/client
+
+# Generated model headers -- exported from a trained net, rebuilt any time, and
+# potentially large (the MNIST one is ~427 KB). Treated like downloaded data:
+# never committed, regenerate with the trainer. Matches at any depth, including
+# the nn_model.h copied into an Arduino sketch folder by `make prepare`.
+*_model.h
+*_samples.bin
+
+# Pure-C client copied into an Arduino sketch folder by `make prepare`
+examples/*/targets/pico_arduino/nn_infer.c
+examples/*/targets/pico_arduino/nn_infer.h
+
+# Downloaded datasets: keep the training_data/ dirs, ignore their contents
+examples/*/training_data/*
+!examples/*/training_data/.gitkeep
+
+# Verification artifact produced by ./gen_reference
+client/ref.bin

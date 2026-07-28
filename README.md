@@ -24,49 +24,173 @@ I am just putting the code out there for anyone to use with the MIT licsense. No
 And if anyone can help me come up with a loss function I can use to report training process, I would be eternally grateful.  Right now I am just doing a test run of the first 1000 shuffled results at the end of each epoch and reporting that.
 
 
-How to build: 
+## What's new
 
-This is how I organize the data and the github project to easily build the project.
+A recent push moved this project from "it trains on MNIST" to "it trains
+*properly* and can actually be deployed to an edge device":
 
+- **The edge client is real and verified.** `client/` is a standalone,
+  dependency-free forward pass (`float`, no BLAS, no SIMD, no `malloc`, static
+  buffers) supporting all 12 activation functions. `export_inference_header()`
+  bakes a trained net into a self-contained C header, and a two-stage test
+  harness confirms the client's predictions match the training library exactly
+  (500/500). See the "Deploying to an embedded device" section below — the whole
+  chain is demonstrated with the Iris example.
+- **Optimizers actually work now.** `train()` used to hardcode plain SGD and
+  silently ignore the optimizer you chose. It now does proper **mini-batch
+  gradient accumulation** and takes one step per batch through the selected
+  method. Adam in particular went from "segfaults and is never applied" to
+  converging robustly — the Iris example trains with Adam.
+- **Real bugs fixed** (several caught under AddressSanitizer): the SIMD bias-add
+  helper skipped half the neurons; the Adam path allocated the wrong struct and
+  divided by zero on step 0; the per-epoch progress check read past small
+  datasets.
+- **Examples are organized around deployment targets.** Each
+  `examples/<name>/` trains a model, and each directory under its `targets/` is a
+  self-contained way to run that model with its own code and directions:
+  `self_test/` (desktop — builds the pure-C client and verifies the whole path)
+  and `pico_arduino/` (a flashable Arduino/Pico sketch). Adding a new target is
+  just a new folder. `make self_test` runs the end-to-end check. MNIST,
+  Fashion-MNIST, and Iris (CSV) so far.
 
-I put the mnist data right next to the githug project and rename the directory to mnist_data.
-If you have the data in a different place, you have to update mnist.c to load the data correctly. 
+## How to build
 
-<code>
-	 .
-	 ├── EmbeddedCNeuralNet
-	 │   ├── a.out
-	 │   ├── examples
-	 │   │   └── mnist.c
-	 │   ├── library
-	 │   │   ├── neural_net.c
-	 │   │   └── neural_net.h
-	 │   ├── LICENSE
-	 │   ├── python
-	 │   │   ├── README.md
-	 │   │   └── train.2023-07-19.py
-	 │   └── README.md
-	 └── mnist_data
-	     ├── t10k-images-idx3-ubyte
-	     ├── t10k-labels-idx1-ubyte
-	     ├── train-images-idx3-ubyte
-	     └── train-labels-idx1-ubyte
-</br> </br>
-On my ubuntu machine I had to install the following library:
+Each dataset lives in its own directory under `examples/`, and each keeps its
+downloaded data in a `training_data/` subdirectory (which is gitignored). See
+`examples/README.md` for the list of examples, and `examples/<name>/README.md`
+for the exact download steps for that dataset.
 
-</br> </br>
+```
+EmbeddedCNeuralNet
+├── library/
+│   ├── neural_net.c
+│   └── neural_net.h
+├── client/                  # standalone edge-inference client (see client/README.md)
+├── examples/
+│   ├── README.md
+│   ├── mnist/
+│   │   ├── mnist.c
+│   │   ├── README.md
+│   │   └── training_data/   # you download MNIST here (gitignored)
+│   ├── fashion-mnist/
+│   └── iris/
+├── python/
+├── LICENSE
+└── README.md
+```
 
-sudo apt-get install libcblas-base-dev </br> </br>
+On my ubuntu machine I had to install BLAS first:
 
- cd EmbeddedCNeuralNet
- gcc library/neural_net.c examples/mnist.c -lm -I. -O6 -lcblas -o enet
+```
+sudo apt-get install libcblas-base-dev
+```
 
+Then build and run an example **from inside its own directory** so the
+`training_data/` paths resolve (using MNIST here):
 
-</br> </br>
-</code>
+```
+cd examples/mnist
+# download the data into training_data/ first -- see this dir's README.md
+gcc ../../library/neural_net.c mnist.c -I../../library -lm -lcblas -O2 -o mnist
+./mnist
+```
 
+## Deploying to an embedded device
 
+Yes — this works end to end today, and **every example already does it**. Each
+`examples/<name>/` exports a trained model that its `targets/` consume: `make
+self_test` (from the example dir) trains, exports, builds the pure-C client, and
+verifies the deployed model matches training; `targets/pico_arduino/` assembles a
+flashable Arduino/Pico sketch (see `examples/README.md`). The walkthrough below
+spells out those same steps by hand, using the Iris example because its trained
+net is tiny (4 → 16 → 3, ~131 parameters, ~0.5 KB as `float`) and fits on
+essentially any microcontroller.
 
-This will build the program in the root of the project and if you run the program from that location then it will find the data and run properly
+### 1. Train on your desktop and export the model
 
+The Iris trainer calls `export_inference_header()` after training. It writes
+`iris_model.h`: a self-contained C header of `float` weights plus the network
+geometry. Nothing about *training* (optimizer, epochs, learning rate) goes in it.
 
+```
+cd examples/iris
+# download the data first -- see this dir's README.md
+gcc ../../library/neural_net.c iris.c -I../../library -lm -lcblas -O2 -o iris
+./iris
+# ... trains, tests, and writes iris_model.h
+```
+
+### 2. Write the tiny program the device will run
+
+The only device-side dependency is the client in `client/`. Your program reads a
+sample, scales it **exactly** the way training did, and calls `nn_classify()`:
+
+```c
+// edge_demo.c
+#include <stdio.h>
+#include "nn_infer.h"
+int main(void) {
+    const char *species[3] = {"Iris-setosa", "Iris-versicolor", "Iris-virginica"};
+    /* On real hardware this comes from a sensor. Scale identically to training
+       -- the Iris loader divides each feature by 8.0. */
+    float sample[4] = {5.1f/8.0f, 3.5f/8.0f, 1.4f/8.0f, 0.2f/8.0f};
+    printf("predicted: %s\n", species[nn_classify(sample)]);
+    return 0;
+}
+```
+
+### 3. Compile client + model + your program into one binary
+
+```
+gcc ../../client/nn_infer.c edge_demo.c \
+    -I../../client -I. -DNN_MODEL_HEADER='"iris_model.h"' -lm -O2 -o edge_demo
+./edge_demo
+# -> predicted: Iris-setosa
+```
+
+That single binary has the weights baked in and **no external dependencies**
+(run `ldd ./edge_demo` — no `libcblas`). RAM use is fixed at compile time:
+`2 * NN_MAX_WIDTH` floats of scratch plus the output buffer.
+
+On a real board you swap `gcc` for the vendor toolchain — `arm-none-eabi-gcc`
+for Pico/Cortex-M, the ESP-IDF / Arduino toolchain for ESP32 — on those same
+three inputs. The output is a `.elf`/`.uf2` you flash. See `client/README.md`.
+
+### Will my model fit?
+
+Weights dominate the flash budget at 4 bytes each:
+
+| Net                       | Params  | Flash (`float`) | Fits...                     |
+|---------------------------|---------|-----------------|-----------------------------|
+| Iris `4 -> 16 -> 3`       | ~131    | ~0.5 KB         | anything, incl. Arduino Uno |
+| MNIST `784 -> 128 -> 64 -> 10` | ~109k | ~437 KB      | ESP32 / Pico / Pi, not Uno  |
+
+The project's whole premise is *small* nets: pick an architecture that fits your
+target's flash and leaves room for the scratch buffers, and train it well.
+
+## Roadmap to painless embedded deployment
+
+Working today: desktop training with real optimizers, `float` model export, a
+verified pure-C inference client, and a single-binary build (all demonstrated
+above). To make deployment turnkey on the smallest hardware:
+
+- [ ] **Ship a real board sketch.** An ESP32/Pico example (Arduino or CMake)
+      that reads a sensor and classifies, so there's a flashable reference — not
+      just a desktop binary.
+- [ ] **AVR / PROGMEM export.** Plain `const` arrays already land in flash on
+      ARM/ESP32/Pico/Pi. Arduino Uno/Nano (Harvard AVR) need `PROGMEM` +
+      `pgm_read_float()`; add an export variant that emits that.
+- [ ] **int8 quantization.** `float` halves `double`; int8 (with per-layer
+      scale/zero-point) quarters it again and unlocks no-FPU chips. Needs a
+      quantizing exporter and an integer forward path in the client.
+- [ ] **Bake in preprocessing.** Today you must hand-match the training-side
+      input scaling on the device (a real footgun). Emit the scaling into the
+      model header so the client applies it automatically.
+- [ ] **Per-bias optimizer state.** Biases currently train with plain SGD even
+      under Adam (the optimizer state arrays are weight-sized). Give biases their
+      own state for fully-correct Adam/RMSProp/etc.
+- [ ] **Fix `load_neural_net`.** Its activation-restore `switch` is stubbed
+      (only sigmoid), so the desktop save/load format round-trips incorrectly.
+      The edge path doesn't use it, but training-side persistence does.
+- [ ] **Report a real training loss** instead of "accuracy on the first 1000
+      shuffled rows" per epoch.

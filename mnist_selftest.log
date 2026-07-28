@@ -1,0 +1,106 @@
+make: Entering directory '/home/jrogers/Documents/Programs/github/EmbeddedCNeuralNet/examples/mnist'
+gcc ../../library/neural_net.c mnist.c -I../../library -lcblas -lm -O2 -o mnist
+./mnist
+Loading MNIST Traning data set. 
+Loading MNIST Testing data set. 
+Creating neural net and loading layers. 
+Starting batch size: 64 
+train
+Epoch: 1 completed, Accuracy: 51.90%
+Epoch: 2 completed, Accuracy: 64.30%
+Epoch: 3 completed, Accuracy: 68.80%
+Epoch: 4 completed, Accuracy: 72.50%
+Epoch: 5 completed, Accuracy: 75.70%
+Epoch: 6 completed, Accuracy: 75.00%
+Epoch: 7 completed, Accuracy: 77.30%
+Epoch: 8 completed, Accuracy: 78.40%
+Epoch: 9 completed, Accuracy: 79.00%
+Epoch: 10 completed, Accuracy: 81.30%
+Epoch: 11 completed, Accuracy: 81.10%
+Epoch: 12 completed, Accuracy: 80.00%
+Epoch: 13 completed, Accuracy: 81.80%
+Epoch: 14 completed, Accuracy: 80.90%
+Epoch: 15 completed, Accuracy: 84.60%
+Epoch: 16 completed, Accuracy: 84.60%
+Epoch: 17 completed, Accuracy: 82.70%
+Epoch: 18 completed, Accuracy: 82.30%
+Epoch: 19 completed, Accuracy: 83.40%
+Epoch: 20 completed, Accuracy: 82.80%
+Epoch: 21 completed, Accuracy: 82.80%
+Epoch: 22 completed, Accuracy: 84.80%
+Epoch: 23 completed, Accuracy: 82.80%
+Epoch: 24 completed, Accuracy: 87.30%
+Epoch: 25 completed, Accuracy: 86.20%
+Epoch: 26 completed, Accuracy: 85.70%
+Epoch: 27 completed, Accuracy: 86.50%
+Epoch: 28 completed, Accuracy: 86.10%
+Epoch: 29 completed, Accuracy: 85.90%
+Epoch: 30 completed, Accuracy: 85.70%
+Changing batch size: 32 
+train
+Epoch: 1 completed, Accuracy: 86.60%
+Epoch: 2 completed, Accuracy: 86.80%
+Epoch: 3 completed, Accuracy: 87.70%
+Epoch: 4 completed, Accuracy: 86.80%
+Epoch: 5 completed, Accuracy: 87.30%
+Epoch: 6 completed, Accuracy: 85.60%
+Epoch: 7 completed, Accuracy: 86.20%
+Epoch: 8 completed, Accuracy: 87.10%
+Epoch: 9 completed, Accuracy: 86.40%
+Epoch: 10 completed, Accuracy: 87.50%
+Epoch: 11 completed, Accuracy: 88.60%
+Epoch: 12 completed, Accuracy: 89.00%
+Epoch: 13 completed, Accuracy: 88.20%
+Epoch: 14 completed, Accuracy: 88.10%
+Epoch: 15 completed, Accuracy: 89.30%
+Epoch: 16 completed, Accuracy: 88.20%
+Epoch: 17 completed, Accuracy: 88.40%
+Epoch: 18 completed, Accuracy: 87.80%
+Epoch: 19 completed, Accuracy: 88.40%
+Epoch: 20 completed, Accuracy: 88.20%
+Epoch: 21 completed, Accuracy: 89.10%
+Epoch: 22 completed, Accuracy: 87.30%
+Epoch: 23 completed, Accuracy: 87.20%
+Epoch: 24 completed, Accuracy: 88.20%
+Epoch: 25 completed, Accuracy: 87.90%
+Epoch: 26 completed, Accuracy: 89.50%
+Epoch: 27 completed, Accuracy: 89.90%
+Epoch: 28 completed, Accuracy: 88.00%
+Epoch: 29 completed, Accuracy: 87.20%
+Epoch: 30 completed, Accuracy: 89.90%
+Changing batch size: 8 
+train
+Epoch: 1 completed, Accuracy: 90.30%
+Epoch: 2 completed, Accuracy: 89.50%
+Epoch: 3 completed, Accuracy: 87.10%
+Epoch: 4 completed, Accuracy: 87.90%
+Epoch: 5 completed, Accuracy: 88.10%
+Epoch: 6 completed, Accuracy: 88.40%
+Epoch: 7 completed, Accuracy: 88.90%
+Epoch: 8 completed, Accuracy: 89.80%
+Epoch: 9 completed, Accuracy: 89.80%
+Epoch: 10 completed, Accuracy: 90.30%
+Epoch: 11 completed, Accuracy: 90.20%
+Epoch: 12 completed, Accuracy: 90.60%
+Epoch: 13 completed, Accuracy: 89.50%
+Epoch: 14 completed, Accuracy: 90.40%
+Epoch: 15 completed, Accuracy: 91.40%
+Epoch: 16 completed, Accuracy: 90.30%
+Epoch: 17 completed, Accuracy: 89.00%
+Epoch: 18 completed, Accuracy: 90.00%
+Epoch: 19 completed, Accuracy: 91.30%
+Epoch: 20 completed, Accuracy: 90.70%
+Epoch: 21 completed, Accuracy: 91.40%
+Epoch: 22 completed, Accuracy: 92.00%
+Epoch: 23 completed, Accuracy: 91.40%
+Epoch: 24 completed, Accuracy: 89.70%
+Epoch: 25 completed, Accuracy: 91.40%
+Epoch: 26 completed, Accuracy: 90.40%
+Epoch: 27 completed, Accuracy: 91.10%
+Epoch: 28 completed, Accuracy: 91.70%
+Epoch: 29 completed, Accuracy: 91.30%
+Epoch: 30 completed, Accuracy: 90.30%
+Testing MNIST Test set of 10,000 samples: 
+Accuracy: 91.07%
+Wrote inference header 'mnist_model.h': 3 layers, 109386 params, ~427.3 KB flash as float.
+Wrote mnist_samples.bin (1000 samples) for the client test.

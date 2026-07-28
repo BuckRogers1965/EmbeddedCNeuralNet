@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
-#include "library/neural_net.h"
+#include "neural_net.h"
 
 #define INPUT_SIZE   784
 #define HIDDEN1_SIZE 128
@@ -73,9 +73,9 @@ int main() {
 
     // Load MNIST data into allocated arrays
     printf("Loading MNIST Traning data set. \n");
-    load_mnist_data("../mnist_data/train-images-idx3-ubyte", "../mnist_data/train-labels-idx1-ubyte", train_images, train_labels, TRAINING_SIZE, INPUT_SIZE, OUTPUT_SIZE);
+    load_mnist_data("training_data/train-images-idx3-ubyte", "training_data/train-labels-idx1-ubyte", train_images, train_labels, TRAINING_SIZE, INPUT_SIZE, OUTPUT_SIZE);
     printf("Loading MNIST Testing data set. \n");
-    load_mnist_data("../mnist_data/t10k-images-idx3-ubyte", "../mnist_data/t10k-labels-idx1-ubyte", test_images, test_labels, TEST_SIZE, INPUT_SIZE, OUTPUT_SIZE);
+    load_mnist_data("training_data/t10k-images-idx3-ubyte", "training_data/t10k-labels-idx1-ubyte", test_images, test_labels, TEST_SIZE, INPUT_SIZE, OUTPUT_SIZE);
 
     // Create neural network
     printf("Creating neural net and loading layers. \n");
@@ -104,6 +104,30 @@ int main() {
     // Test neural network
     printf("Testing MNIST Test set of 10,000 samples: \n");
     test(net, test_images, test_labels, TEST_SIZE);
+
+    // Export the trained net for the embedded client, and dump a subset of the
+    // test set (as float) with this net's prediction for each, so client.c can
+    // replay them and prove the deployed model reproduces these decisions. This
+    // is what makes the example test the whole path -- see README.md / Makefile.
+    export_inference_header(net, "mnist_model.h");
+    {
+        int dump = 1000; // subset; full 10k images would be ~31 MB
+        FILE *sf = fopen("mnist_samples.bin", "wb");
+        if (sf) {
+            fwrite(&dump, sizeof(int), 1, sf);
+            int isz = INPUT_SIZE;
+            fwrite(&isz, sizeof(int), 1, sf);
+            float buf[INPUT_SIZE];
+            for (int i = 0; i < dump; ++i) {
+                for (int j = 0; j < INPUT_SIZE; ++j) buf[j] = (float)test_images[i][j];
+                int reference = classify(net, test_images[i]);
+                fwrite(buf, sizeof(float), isz, sf);
+                fwrite(&reference, sizeof(int), 1, sf);
+            }
+            fclose(sf);
+            printf("Wrote mnist_samples.bin (%d samples) for the client test.\n", dump);
+        }
+    }
 
     // Free memory for training and test data
     for (int i = 0; i < TRAINING_SIZE; ++i) {

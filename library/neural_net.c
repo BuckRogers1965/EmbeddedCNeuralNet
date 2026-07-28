@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include "library/neural_net.h"
+#include "neural_net.h"
 #include <cblas.h>
 #include <immintrin.h>
 
@@ -22,6 +22,8 @@ typedef struct
     double *activations;
     int activation;
     double *errors;
+    double *weight_gradients; // gradients accumulated over the current mini-batch
+    double *bias_gradients;   // (summed across samples, averaged when applied)
     int input_size;
     int output_size;
     activation_function activate;
@@ -54,6 +56,7 @@ struct NeuralNet
 void chooser(NeuralNet *net, int layer_index, int weight_index, double gradient, int is_bias);
 void forward_pass(NeuralNet *net, double *input, double *output);
 void backward_pass(NeuralNet *net, double *input, double *expected, double *output);
+void apply_gradients(NeuralNet *net, int batch_count);
 
 // -- Activation function implementations
 double sigmoid(double x)
@@ -225,11 +228,17 @@ void shuffle_data(double **images, double **labels, int size)
 
 
 void add_biases_simd(double *output, double *biases, int output_size) {
-    for (int i = 0; i < output_size; i += 4) {
+    int i = 0;
+    // __m128d holds 2 doubles, so advance by 2 and cover every neuron.
+    for (; i + 2 <= output_size; i += 2) {
         __m128d voutput = _mm_loadu_pd(&output[i]);
         __m128d vbiases = _mm_loadu_pd(&biases[i]);
         voutput = _mm_add_pd(voutput, vbiases);
         _mm_storeu_pd(&output[i], voutput);
+    }
+    // Scalar tail for an odd output_size (avoids reading past the arrays).
+    for (; i < output_size; ++i) {
+        output[i] += biases[i];
     }
 }
 
@@ -319,6 +328,11 @@ double cross_entropy_error_derivative(NeuralNet *net, double output, double expe
     return ((output - expected) / (output * (1 - output) + 1e-15));
 }
 
+// One sample's backward pass: compute per-layer errors and ACCUMULATE gradients
+// into each layer's weight_gradients/bias_gradients. It does NOT touch the
+// weights -- apply_gradients() does that once per mini-batch. Keeping the
+// weights fixed for the whole batch also means the backprop below uses
+// consistent weights for every sample (proper mini-batch gradient).
 void backward_pass(NeuralNet *net, double *input, double *expected, double *output) {
     int i, j, k;
     Layer *output_layer = &net->layers[net->num_layers - 1];
@@ -330,36 +344,23 @@ void backward_pass(NeuralNet *net, double *input, double *expected, double *outp
         }
     } else {
         for (i = 0; i < output_layer->output_size; ++i) {
-            output_layer->errors[i] = net->calculate_error_derivative(net, output[i], expected[i]) * 
+            output_layer->errors[i] = net->calculate_error_derivative(net, output[i], expected[i]) *
                                       output_layer->activate_derivative(output_layer->activations[i]);
         }
     }
 
-    // Backpropagate errors and update weights
+    // Backpropagate errors and accumulate this sample's gradients
     for (i = net->num_layers - 1; i > 0; --i) {
         Layer *current_layer = &net->layers[i];
         Layer *prev_layer = &net->layers[i - 1];
 
-        // Calculate gradients and update weights and biases
         for (j = 0; j < current_layer->output_size; ++j) {
-            for (k = 0; k < current_layer->input_size; k += 2) {
+            for (k = 0; k < current_layer->input_size; ++k) {
                 int weight_index = j * current_layer->input_size + k;
-                double gradient0 = current_layer->errors[j] * prev_layer->activations[k] / net->batchsize;
-                double gradient1 = current_layer->errors[j] * prev_layer->activations[k + 1] / net->batchsize;
-
-                double jitter0 = jitter(net);
-                double jitter1 = jitter(net);
-
-                // Use SSE2 to update weights in pairs
-                __m128d grad = _mm_set_pd(gradient1 - jitter1, gradient0 - jitter0);
-                __m128d weight = _mm_loadu_pd(&current_layer->weights[weight_index]);
-                __m128d update = _mm_sub_pd(weight, _mm_mul_pd(grad, _mm_set1_pd(net->learningrate)));
-
-                _mm_storeu_pd(&current_layer->weights[weight_index], update);
+                current_layer->weight_gradients[weight_index] +=
+                    current_layer->errors[j] * prev_layer->activations[k];
             }
-            // Update biases with jitter
-            double bias_update = current_layer->errors[j] / net->batchsize - jitter(net);
-            current_layer->biases[j] -= net->learningrate * bias_update;
+            current_layer->bias_gradients[j] += current_layer->errors[j];
         }
 
         // Calculate errors for previous layer (if not input layer)
@@ -374,6 +375,7 @@ void backward_pass(NeuralNet *net, double *input, double *expected, double *outp
         }
     }
 }
+
 
 
 void backward_pass_no_jitter(NeuralNet *net, double *input, double *expected, double *output) {
@@ -632,7 +634,10 @@ void create_adam(NeuralNet *net)
     params->beta1 = 0.9;
     params->beta2 = 0.999;
     params->epsilon = 1e-8;
-    params->t = 0;
+    // Start at 1: adam() runs during the first batch, before train() bumps the
+    // timestep, so t=0 here would make the bias correction divide by
+    // (1 - beta^0) = 0 and produce NaN weights.
+    params->t = 1;
     net->opt_params = params;
 }
 void adam(void *vparams, double *block, int layer_index, int weight_index, double gradient, double learningrate)
@@ -693,7 +698,7 @@ void setup_chooser_params(NeuralNet *net)
         break;
     case OPT_ADAM:
         net->chooser = adam;
-        create_rmsprop(net);
+        create_adam(net);
         break;
     case OPT_NAG:
         net->chooser = nag;
@@ -701,6 +706,44 @@ void setup_chooser_params(NeuralNet *net)
         break;
     default:
         break;
+    }
+}
+
+// Apply one optimizer step per mini-batch using the mean gradient accumulated
+// over batch_count samples, then zero the accumulators for the next batch.
+// Weights go through net->chooser (so OPT_ADAM / momentum / RMSProp / NAG all
+// take effect); biases use plain SGD because the optimizer state arrays are
+// sized for the weights only (per-bias optimizer state is a future addition).
+// Defined here, after the optimizer structs, because it touches AdamParams::t.
+void apply_gradients(NeuralNet *net, int batch_count)
+{
+    if (batch_count <= 0)
+        return;
+
+    for (int i = net->num_layers - 1; i > 0; --i)
+    {
+        Layer *layer = &net->layers[i];
+
+        for (int j = 0; j < layer->output_size; ++j)
+        {
+            for (int k = 0; k < layer->input_size; ++k)
+            {
+                int weight_index = j * layer->input_size + k;
+                double gradient = layer->weight_gradients[weight_index] / batch_count;
+                net->chooser(net->opt_params, layer->weights, i, weight_index,
+                             gradient - jitter(net), net->learningrate);
+                layer->weight_gradients[weight_index] = 0.0;
+            }
+            double bias_gradient = layer->bias_gradients[j] / batch_count - jitter(net);
+            layer->biases[j] -= net->learningrate * bias_gradient;
+            layer->bias_gradients[j] = 0.0;
+        }
+    }
+
+    // Adam's timestep advances once per optimizer step, i.e. once per batch.
+    if (net->opt_method == OPT_ADAM)
+    {
+        ((AdamParams *)net->opt_params)->t++;
     }
 }
 
@@ -851,9 +894,12 @@ void add_layer(NeuralNet *net, int output_size, ActivationFunction activation)
     layer->biases = (double *)malloc(output_size * sizeof(double));
     layer->activations = (double *)malloc(output_size * sizeof(double));
     layer->errors = (double *)malloc(output_size * sizeof(double));
+    layer->weight_gradients = (double *)calloc(input_size * output_size, sizeof(double));
+    layer->bias_gradients = (double *)calloc(output_size, sizeof(double));
     layer->activation = activation;
 
-    if (!layer->weights || !layer->biases || !layer->activations || !layer->errors)
+    if (!layer->weights || !layer->biases || !layer->activations || !layer->errors ||
+        !layer->weight_gradients || !layer->bias_gradients)
     {
         perror("Failed to allocate memory for layer parameters");
         exit(1);
@@ -945,31 +991,26 @@ void train(NeuralNet *net, double **images, double **labels, int trainsize)
         shuffle_data(images, labels, trainsize);
         for (batch = 0; batch < trainsize; batch += net->batchsize)
         {
-            // Reset gradients
-            for (i = 0; i < net->num_layers; ++i)
-            {
-                memset(net->layers[i].errors, 0, net->layers[i].output_size * sizeof(double));
-            }
-
-            // Process mini-batch
+            // Accumulate gradients over the mini-batch (backward_pass adds each
+            // sample's gradient into the layers' *_gradients accumulators)...
+            int batch_count = 0;
             for (i = 0; i < net->batchsize && (batch + i) < trainsize; ++i)
             {
                 memcpy(input, images[batch + i], net->layers[0].input_size * sizeof(double));
                 forward_pass(net, input, output);
                 backward_pass(net, input, labels[batch + i], output);
+                ++batch_count;
             }
 
-            // Update optimization-specific parameters if needed
-            if (net->opt_method == OPT_ADAM)
-            {
-                AdamParams *params = (AdamParams *)net->opt_params;
-                params->t++; // Increment timestep
-            }
+            // ...then take one optimizer step on the mean gradient and clear the
+            // accumulators. Adam's timestep advances once per batch inside here.
+            apply_gradients(net, batch_count);
         }
 
-        // Print epoch results
+        // Print epoch results (sample up to 1000 training rows, but never more
+        // than the set actually holds -- small datasets would read past the end).
         printf("Epoch: %d completed, ", net->current_epoch);
-        test(net, images, labels, 1000);
+        test(net, images, labels, trainsize < 1000 ? trainsize : 1000);
 
         // Adjust learning rate or other parameters if needed
         if (net->adj_lr_epoch > 0 && (net->current_epoch) % (int)net->adj_lr_epoch == 0)
@@ -1049,6 +1090,86 @@ void save_neural_net(NeuralNet *net, const char *filename)
 
     fclose(file);
 }
+void export_inference_header(NeuralNet *net, const char *filename)
+{
+    FILE *file = fopen(filename, "w");
+    if (!file)
+    {
+        perror("export_inference_header: failed to open file for writing");
+        return;
+    }
+
+    int output_size = net->layers[net->num_layers - 1].output_size;
+
+    // Widest buffer the client needs: the input plus every layer's output.
+    int max_width = net->input_size;
+    long total_params = 0;
+    for (int i = 0; i < net->num_layers; i++)
+    {
+        if (net->layers[i].output_size > max_width)
+            max_width = net->layers[i].output_size;
+        total_params += (long)net->layers[i].input_size * net->layers[i].output_size;
+        total_params += net->layers[i].output_size;
+    }
+
+    fprintf(file, "#ifndef NN_MODEL_H\n#define NN_MODEL_H\n");
+    fprintf(file, "/* Auto-generated by export_inference_header(). Do not edit by hand. */\n");
+    fprintf(file, "/* Include this header in exactly one translation unit (client/nn_infer.c does). */\n\n");
+
+    fprintf(file, "#define NN_INPUT_SIZE  %d\n", net->input_size);
+    fprintf(file, "#define NN_OUTPUT_SIZE %d\n", output_size);
+    fprintf(file, "#define NN_LAYER_COUNT %d\n", net->num_layers);
+    fprintf(file, "#define NN_MAX_WIDTH   %d\n\n", max_width);
+
+    fprintf(file, "static const int nn_layer_input[NN_LAYER_COUNT]  = {");
+    for (int i = 0; i < net->num_layers; i++)
+        fprintf(file, "%s%d", i ? ", " : "", net->layers[i].input_size);
+    fprintf(file, "};\n");
+
+    fprintf(file, "static const int nn_layer_output[NN_LAYER_COUNT] = {");
+    for (int i = 0; i < net->num_layers; i++)
+        fprintf(file, "%s%d", i ? ", " : "", net->layers[i].output_size);
+    fprintf(file, "};\n");
+
+    // Activation codes match the ActivationFunction enum in neural_net.h,
+    // which the client mirrors.
+    fprintf(file, "static const int nn_layer_activation[NN_LAYER_COUNT] = {");
+    for (int i = 0; i < net->num_layers; i++)
+        fprintf(file, "%s%d", i ? ", " : "", net->layers[i].activation);
+    fprintf(file, "};\n");
+
+    for (int l = 0; l < net->num_layers; l++)
+    {
+        Layer *layer = &net->layers[l];
+        int n = layer->input_size * layer->output_size;
+
+        fprintf(file, "\nstatic const float nn_w%d[%d] = {\n", l, n);
+        for (int k = 0; k < n; k++)
+            fprintf(file, "%.9g,%s", (float)layer->weights[k], (k % 8 == 7) ? "\n" : " ");
+        fprintf(file, "\n};\n");
+
+        fprintf(file, "static const float nn_b%d[%d] = {\n", l, layer->output_size);
+        for (int k = 0; k < layer->output_size; k++)
+            fprintf(file, "%.9g,%s", (float)layer->biases[k], (k % 8 == 7) ? "\n" : " ");
+        fprintf(file, "\n};\n");
+    }
+
+    fprintf(file, "\nstatic const float * const nn_layer_weights[NN_LAYER_COUNT] = {");
+    for (int l = 0; l < net->num_layers; l++)
+        fprintf(file, "%snn_w%d", l ? ", " : "", l);
+    fprintf(file, "};\n");
+
+    fprintf(file, "static const float * const nn_layer_biases[NN_LAYER_COUNT]  = {");
+    for (int l = 0; l < net->num_layers; l++)
+        fprintf(file, "%snn_b%d", l ? ", " : "", l);
+    fprintf(file, "};\n");
+
+    fprintf(file, "\n#endif /* NN_MODEL_H */\n");
+    fclose(file);
+
+    printf("Wrote inference header '%s': %d layers, %ld params, ~%.1f KB flash as float.\n",
+           filename, net->num_layers, total_params, total_params * sizeof(float) / 1024.0);
+}
 NeuralNet *load_neural_net(const char *filename)
 {
     FILE *file = fopen(filename, "rb");
@@ -1098,8 +1219,11 @@ NeuralNet *load_neural_net(const char *filename)
         layer->biases = (double *)malloc(layer->output_size * sizeof(double));
         layer->activations = (double *)malloc(layer->output_size * sizeof(double));
         layer->errors = (double *)malloc(layer->output_size * sizeof(double));
+        layer->weight_gradients = (double *)calloc(layer->input_size * layer->output_size, sizeof(double));
+        layer->bias_gradients = (double *)calloc(layer->output_size, sizeof(double));
 
-        if (!layer->weights || !layer->biases || !layer->activations || !layer->errors)
+        if (!layer->weights || !layer->biases || !layer->activations || !layer->errors ||
+            !layer->weight_gradients || !layer->bias_gradients)
         {
             perror("Failed to allocate memory for layer parameters");
             // Clean up and return NULL (implementation left as an exercise)
@@ -1158,6 +1282,8 @@ void free_neural_net(NeuralNet *net)
         free(net->layers[i].biases);
         free(net->layers[i].activations);
         free(net->layers[i].errors);
+        free(net->layers[i].weight_gradients);
+        free(net->layers[i].bias_gradients);
     }
     // Free optimization parameters
     switch (net->opt_method)
